@@ -1,12 +1,37 @@
-async function createOrder(req, res) {
-    
-  const body = JSON.parse(req.body);                    // HTTP
-  if (!body.items.length) return res.status(400).send("empty"); // HTTP
-  let total = 0;
-  for (const i of body.items) total += i.price * i.qty; // предметная область
-  if (total > 10000) total *= 0.95;                     // предметная область
-  await db.query("INSERT INTO orders (user_id, total) VALUES ($1, $2)",
-                 [req.user.id, total]);                 // хранилище
-  await smtp.send(req.user.email, "Заказ принят");      // почта
-  res.status(201).send(JSON.stringify({ total }));      // HTTP
+const {
+  EmptyOrderError,
+  InvalidOrderItemError,
+} = require("./domain/Order");
+
+function createOrderHandler(createOrder) {
+  return async function handleCreateOrder(req, res) {
+    let body;
+
+    try {
+      body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    } catch (_error) {
+      return res.status(400).send("invalid json");
+    }
+
+    try {
+      const order = await createOrder.execute({
+        userId: req.user.id,
+        email: req.user.email,
+        items: body?.items,
+      });
+
+      return res.status(201).send(JSON.stringify({ total: order.total }));
+    } catch (error) {
+      if (
+        error instanceof EmptyOrderError ||
+        error instanceof InvalidOrderItemError
+      ) {
+        return res.status(400).send(error.message);
+      }
+
+      throw error;
+    }
+  };
 }
+
+module.exports = { createOrderHandler };
